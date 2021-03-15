@@ -1,4 +1,24 @@
 #!/usr/bin/env ruby
+FIXED_GEMS = %w(rails pg paginate serializer rubocop simplecov factory_bot rspec rack-cors listen)
+
+def qa(str)
+  puts str
+  res = STDIN.gets.chomp
+  return true if res.casecmp('Y')
+  return false if res.casecmp('N')
+
+  qa('Please answer with Y(yes) or N(no)')
+end
+
+def remove_gem_config(gem_name)
+  config_name = gem_name.gsub('-','_').partition('_').first
+  config_files = Dir["config/initializers/*"].select { |filename| filename.include?(config_name) }
+  config_files.each { |file| File.delete(file) }
+  if config_name.casecmp('Sidekiq')
+    out = File.read('config/routes.rb').gsub("mount Sidekiq::Web, at: 'sidekiq'\n", '')
+    File.open('config/routes.rb', 'w') { |file| file.puts(out) }
+  end
+end
 
 # Changes App name
 app_name = ARGV.first
@@ -15,6 +35,24 @@ Dir.glob('**/*', File::FNM_DOTMATCH).reject { |f| f['.git'] || f['script'] }.eac
   File.open(name, 'w+') do |f|
     f << out
   end
+end
+
+# User selects which gems they want to keep
+response = qa('Do you wish to exclude some of the standard bootstrap gems? Y/N')
+if response
+  file = File.read('Gemfile')
+  lines = file.split("\n").select { |line| line.start_with?('gem', '  gem') }
+  gems = lines.reject { |line| FIXED_GEMS.any? { |gem| line.include?(gem) } }
+  gems.each do |gem|
+    lindex = gem.index("'") + 1
+    rindex = gem.enum_for(:scan, /(?=')/).map { Regexp.last_match.offset(0).first }[1]
+    gem_name = gem[lindex, rindex - lindex]
+    next unless qa("Remove #{gem_name}? Y/N")
+    file.gsub!(gem, '')
+    remove_gem_config
+  end
+  file = file.split("\n\n\n").reject { |a| a.empty? }.join("\n")
+  File.open('Gemfile', 'w') { |gemfile| gemfile.puts(file) }
 end
 
 # Removes Gitter and LICENSE
